@@ -137,10 +137,11 @@ def train_deep_hedge_lstm(
     df,
     K, B, r, T,
     seq_len=20,
-    epochs=5,
+    epochs=100,
     lr=1e-3,
-    device=torch.device("cpu")
+    device=torch.device("cuda")
 ):
+    
     """
     Train an LSTM deep hedge strategy on real-world data for a Put Down-and-In.
 
@@ -315,7 +316,7 @@ def plot_loss_function(loss_history, title="Deep-Hedging Loss"):
 def main():
     st.title("Comparaison : Modèle Classique vs LSTM Deep Hedging (Put Down-and-In)")
 
-    # Sidebar - Option params
+    # Sidebar - Paramètres Option
     st.sidebar.header("Paramètres Option")
     S0 = st.sidebar.slider("Spot initial (S0)", min_value=50, max_value=200, value=100, step=1)
     K = st.sidebar.slider("Strike (K)", min_value=50, max_value=200, value=100, step=1)
@@ -339,9 +340,11 @@ def main():
             S0, K, B, r, sigma=sigma_default, T=T
         )
         st.write(f"**Prix Put Down-and-In (Monte Carlo BS) :** {price_bs:.4f}")
+
+        # Sauvegarde dans la session
         st.session_state['price_bs'] = price_bs
         st.session_state['pnl_bs_values'] = np.array(pnl_bs_values)
-        st.session_state['delta_bs_values'] = delta_bs_values
+        st.session_state['delta_bs_values'] = np.array(delta_bs_values)
 
     # 2) Deep Hedging with LSTM on Real Data
     st.write("## 2) LSTM Deep Hedging (données réelles)")
@@ -361,12 +364,14 @@ def main():
                 device=device
             )
             st.write(f"**Deep Hedging terminé. Taille dataset =** {len(df_data)}")
+
+            # Sauvegarde dans la session
             st.session_state['price_dh'] = float(model.cost.item())
             st.session_state['pnl_dh_values'] = final_pnls
             st.session_state['delta_dh_values'] = avg_deltas
             st.session_state['loss_history'] = loss_hist
 
-    # 3) Plots if both are available
+    # 3) Plots + Comparaison si on a les deux modèles
     if 'price_dh' in st.session_state and 'price_bs' in st.session_state:
         st.write("### Distribution du PnL (Profit and Loss)")
         plot_pnl_histogram(st.session_state['pnl_bs_values'], st.session_state['pnl_dh_values'])
@@ -376,6 +381,43 @@ def main():
 
         st.write("### Fonction de perte au fil des itérations")
         plot_loss_function(st.session_state['loss_history'], title="Deep-Hedging Loss")
+
+        # === NOUVEAU : TABLEAU DE COMPARAISON ===
+
+        # 1) Calcul des metrics pour chaque modèle
+        # ---------------------------------------
+        price_bs = st.session_state['price_bs']
+        price_dh = st.session_state['price_dh']
+
+        # On peut prendre la moyenne (et stdev) des PnLs comme indicateur de performance
+        pnl_bs = st.session_state['pnl_bs_values']
+        pnl_dh = st.session_state['pnl_dh_values']
+
+        pnl_bs_mean = np.mean(pnl_bs)
+        pnl_bs_std  = np.std(pnl_bs)
+
+        pnl_dh_mean = np.mean(pnl_dh)
+        pnl_dh_std  = np.std(pnl_dh)
+
+        # Moyenne des deltas (ou la dernière valeur, selon ce qui vous intéresse)
+        delta_bs_mean = np.mean(st.session_state['delta_bs_values'])
+        delta_dh_mean = np.mean(st.session_state['delta_dh_values'])
+
+        # 2) Construction du DataFrame de comparaison
+        # -------------------------------------------
+        df_compare = pd.DataFrame({
+            'Modèle':        ['Black-Scholes', 'Deep Hedging'],
+            'Prix estimé':   [price_bs, price_dh],
+            'Delta moyen':   [delta_bs_mean, delta_dh_mean],
+            'PnL moyen':     [pnl_bs_mean, pnl_dh_mean],
+            'PnL écart-type':[pnl_bs_std,  pnl_dh_std]
+        })
+
+        st.write("### Tableau comparatif")
+        st.table(df_compare)
+
+        # Vous pouvez aussi afficher sous forme de dataframe éditable
+        # st.dataframe(df_compare)
 
 if __name__ == "__main__":
     main()
